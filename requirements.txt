@@ -1,0 +1,23 @@
+# ── Web Framework ──────────────────────────────────────────
+fastapi==0.111.0          # Our backend API framework
+uvicorn==0.30.1           # Runs the FastAPI server
+
+# ── ML / BERT ──────────────────────────────────────────────
+transformers==4.41.2      # HuggingFace transformers (BERT lives here)
+torch==2.10.0             # PyTorch — required by transformers
+# NOTE: if you swap BERT to a different HF model later,
+# you only change config.py — NOT this file
+
+# ── LLM Providers ──────────────────────────────────────────
+openai==1.35.3            # GPT-4o client
+# google-generativeai==0.7.0   # Uncomment when swapping to Gemini
+# groq==0.9.0                  # Uncomment when swapping to Groq
+
+# ── Frontend ───────────────────────────────────────────────
+streamlit==1.36.0         # Our UI
+
+# ── Utilities ──────────────────────────────────────────────
+python-dotenv==1.0.1      # Reads .env file for API keys
+pydantic==2.7.4           # Data validation (used in models.py)
+httpx==0.27.0             # Async HTTP client (FastAPI uses this)
+requests==2.32.3          # Streamlit uses this to call FastAPI
