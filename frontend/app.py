@@ -12,7 +12,7 @@ import time
 import json
 import os
 from transformers import AutoTokenizer, AutoModelForSequenceClassification
-from openai import OpenAI
+# from openai import OpenAI
 from dotenv import load_dotenv
 
 # Load .env file (for local dev)
