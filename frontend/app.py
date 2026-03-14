@@ -259,18 +259,18 @@ def render_verdict(verdict, confidence):
 
 
 def render_reasoning(reasoning, red_flags, what_to_verify):
-    st.markdown("### 🧠 AI Reasoning")
+    st.markdown("###  AI Reasoning")
     st.write(reasoning)
 
     if red_flags:
-        st.markdown("### 🚩 Red Flags Detected")
+        st.markdown("###  Red Flags Detected")
         for flag in red_flags:
             st.markdown(f'<div class="red-flag">🚩 {flag}</div>', unsafe_allow_html=True)
 
     st.markdown("<br>", unsafe_allow_html=True)
 
     if what_to_verify:
-        st.markdown("### 🔎 What To Verify")
+        st.markdown("###  What To Verify")
         for item in what_to_verify:
             st.markdown(f'<div class="verify-item">🔎 {item}</div>', unsafe_allow_html=True)
 
@@ -336,7 +336,7 @@ def main():
             verdict, confidence, fake_prob, real_prob = run_bert(news_text)
 
         # Stage 2 - GPT-4o
-        with st.spinner("🧠 Stage 2: GPT-4o generating reasoning..."):
+        with st.spinner(" Stage 2: GPT-4o generating reasoning..."):
             reasoning, red_flags, what_to_verify = run_llm(
                 news_text, verdict, confidence
             )
@@ -345,7 +345,7 @@ def main():
 
         # Display results
         st.divider()
-        st.markdown("## 📊 Analysis Results")
+        st.markdown("##  Analysis Results")
         render_verdict(verdict, confidence)
         st.divider()
         render_reasoning(reasoning, red_flags, what_to_verify)
