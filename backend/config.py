@@ -30,7 +30,8 @@ CONFIDENCE_THRESHOLD = 0.6
 # ── LLM Config ─────────────────────────────────────────────────
 # To swap LLM provider: change ONLY this line!
 # Options: "openai" | "gemini" | "groq"
-LLM_PROVIDER = "openai"
+# LLM_PROVIDER = "openai"
+LLM_PROVIDER = "groq"
 
 # LLM model names for each provider
 # When you swap LLM_PROVIDER, the right model is picked automatically

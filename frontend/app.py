@@ -183,14 +183,18 @@ def run_llm(text: str, verdict: str, confidence: float):
     Returns reasoning, red_flags, what_to_verify
     """
     try:
-        client = OpenAI(api_key=get_openai_key())
+        from groq import Groq
+        # client = OpenAI(api_key=get_openai_key())
+        client = Groq(api_key=st.secrets.get("GROQ_API_KEY") or os.getenv("GROQ_API_KEY", ""))
+        confidence_pct = round(confidence * 100, 1)
         confidence_pct = round(confidence * 100, 1)
 
         response = client.chat.completions.create(
-            model="gpt-4o",
+            model="llama3-8b-8192",
             temperature=0.2,
             max_tokens=500,
-            response_format={"type": "json_object"},
+            # response_format={"type": "json_object"},
+            
             messages=[
                 {
                     "role": "system",
