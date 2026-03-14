@@ -279,10 +279,6 @@ def render_reasoning(reasoning, red_flags, what_to_verify):
 def main():
     # Header
     st.title("🔍 Fake News Detector")
-    st.markdown(
-        "Paste any news article below. Our AI uses **RoBERTa** for detection "
-        "and **GPT-4o** to explain the reasoning."
-    )
     st.divider()
 
     # Example button
