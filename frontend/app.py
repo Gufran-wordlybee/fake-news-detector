@@ -190,7 +190,7 @@ def run_llm(text: str, verdict: str, confidence: float):
         confidence_pct = round(confidence * 100, 1)
 
         response = client.chat.completions.create(
-            model="llama3-8b-8192",
+            model="llama-3.3-70b-versatile",
             temperature=0.2,
             max_tokens=500,
             # response_format={"type": "json_object"},
