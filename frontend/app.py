@@ -1,39 +1,36 @@
 # ================================================================
-# app.py — Streamlit Frontend for Fake News Detector
+# app.py — Standalone Streamlit App (merged frontend + backend)
 # ================================================================
-# This is the entire UI — what users see and interact with.
-# It:
-#   1. Takes news text input from the user
-#   2. Sends it to FastAPI backend via HTTP POST
-#   3. Displays the verdict, confidence, reasoning, red flags
-#
-# To run:
-#   streamlit run frontend/app.py
+# For hackathon deployment — everything in one file!
+# BERT model + GPT-4o called directly from Streamlit
+# No FastAPI needed for the demo link
 # ================================================================
 
 import streamlit as st
-import requests
+import torch
+import time
 import json
-from backend.config import BACKEND_URL
+import os
+from transformers import AutoTokenizer, AutoModelForSequenceClassification
+from openai import OpenAI
+from dotenv import load_dotenv
+
+# Load .env file (for local dev)
+# On Streamlit Cloud, secrets come from st.secrets
+load_dotenv()
 
 # ── Page Config ──────────────────────────────────────────────────
-# Must be the FIRST streamlit command in the file
 st.set_page_config(
     page_title="Fake News Detector",
     page_icon="🔍",
-    layout="centered",       # cleaner single-column layout
+    layout="centered",
     initial_sidebar_state="collapsed"
 )
 
-
 # ── Custom CSS ───────────────────────────────────────────────────
-# Inject some styling to make the UI look polished
 st.markdown("""
 <style>
-    /* Main container padding */
     .main { padding-top: 2rem; }
-
-    /* Verdict badge styling */
     .verdict-fake {
         background-color: #ff4b4b;
         color: white;
@@ -61,8 +58,6 @@ st.markdown("""
         font-weight: bold;
         display: inline-block;
     }
-
-    /* Red flag item styling */
     .red-flag {
         background-color: #fff3f3;
         border-left: 4px solid #ff4b4b;
@@ -70,8 +65,6 @@ st.markdown("""
         margin: 0.3rem 0;
         border-radius: 0 8px 8px 0;
     }
-
-    /* Verify item styling */
     .verify-item {
         background-color: #f0f7ff;
         border-left: 4px solid #1e88e5;
@@ -79,8 +72,6 @@ st.markdown("""
         margin: 0.3rem 0;
         border-radius: 0 8px 8px 0;
     }
-
-    /* Footer text */
     .footer {
         text-align: center;
         color: #888;
@@ -91,180 +82,206 @@ st.markdown("""
 """, unsafe_allow_html=True)
 
 
-# ── Helper Functions ─────────────────────────────────────────────
+# ── Config ───────────────────────────────────────────────────────
+# Model name — change this one line to swap models!
+BERT_MODEL_NAME = "hamzab/roberta-fake-news-classification"
+CONFIDENCE_THRESHOLD = 0.6
 
-def check_backend_health() -> bool:
-    """
-    Ping the FastAPI backend to see if it's running.
-    Returns True if healthy, False if unreachable.
-    """
+# Get OpenAI key from Streamlit secrets (cloud) or .env (local)
+def get_openai_key():
     try:
-        response = requests.get(
-            f"{BACKEND_URL}/health",
-            timeout=5          # don't wait more than 5 seconds
-        )
-        return response.status_code == 200
-    except requests.exceptions.ConnectionError:
-        return False
+        return st.secrets["OPENAI_API_KEY"]
+    except:
+        return os.getenv("OPENAI_API_KEY", "")
 
 
-def analyze_text(text: str) -> dict:
+# ── BERT Model (cached so it loads only once) ────────────────────
+@st.cache_resource
+def load_bert_model():
     """
-    Send text to FastAPI /analyze endpoint.
-    Returns the full response as a dict, or None on failure.
+    Load BERT model once and cache it.
+    @st.cache_resource means this runs only on first call,
+    then reuses the same model for all subsequent calls.
     """
-    try:
-        response = requests.post(
-            f"{BACKEND_URL}/analyze",
-            json={"text": text},
-            timeout=60         # LLM can take up to 60s
-        )
+    st.info("Loading AI model for the first time... (this takes ~1 min)")
 
-        if response.status_code == 200:
-            return response.json()
-
-        elif response.status_code == 422:
-            # Validation error — text too short/long
-            detail = response.json().get("detail", [])
-            if isinstance(detail, list) and len(detail) > 0:
-                st.error(f"Input error: {detail[0].get('msg', 'Invalid input')}")
-            return None
-
-        elif response.status_code == 503:
-            st.error("Analysis service temporarily unavailable. Please try again.")
-            return None
-
-        else:
-            st.error(f"Unexpected error (status {response.status_code})")
-            return None
-
-    except requests.exceptions.Timeout:
-        st.error("Request timed out. The model may be loading — please try again.")
-        return None
-
-    except requests.exceptions.ConnectionError:
-        st.error("Cannot connect to backend. Make sure FastAPI server is running.")
-        return None
-
-
-def render_verdict(verdict: str, confidence: float):
-    """Renders the big verdict badge + confidence score."""
-
-    confidence_pct = round(confidence * 100, 1)
-
-    if verdict == "FAKE":
-        st.markdown(
-            '<span class="verdict-fake">❌ FAKE NEWS</span>',
-            unsafe_allow_html=True
-        )
-    elif verdict == "REAL":
-        st.markdown(
-            '<span class="verdict-real">✅ LIKELY REAL</span>',
-            unsafe_allow_html=True
-        )
+    # Detect best available device
+    if torch.backends.mps.is_available():
+        device = torch.device("mps")   # Apple Silicon
+    elif torch.cuda.is_available():
+        device = torch.device("cuda")  # Nvidia GPU
     else:
-        st.markdown(
-            '<span class="verdict-uncertain">⚠️ UNCERTAIN</span>',
-            unsafe_allow_html=True
+        device = torch.device("cpu")   # CPU fallback
+
+    tokenizer = AutoTokenizer.from_pretrained(BERT_MODEL_NAME)
+    model = AutoModelForSequenceClassification.from_pretrained(BERT_MODEL_NAME)
+    model.to(device)
+    model.eval()
+
+    return tokenizer, model, device
+
+
+# ── Stage 1: BERT Detection ──────────────────────────────────────
+def run_bert(text: str):
+    """
+    Run BERT model on the text.
+    Returns verdict, confidence, fake_prob, real_prob
+    """
+    tokenizer, model, device = load_bert_model()
+
+    # Tokenize input
+    inputs = tokenizer(
+        text,
+        return_tensors="pt",
+        truncation=True,
+        max_length=512,
+        padding=True
+    )
+    inputs = {k: v.to(device) for k, v in inputs.items()}
+
+    # Run inference
+    with torch.no_grad():
+        outputs = model(**inputs)
+
+    # Convert to probabilities
+    probs = torch.softmax(outputs.logits, dim=1)[0].cpu().tolist()
+
+    # Map to labels
+    id2label = model.config.id2label
+    label_probs = {id2label[i].upper(): p for i, p in enumerate(probs)}
+
+    # Get fake/real probabilities
+    fake_prob = 0.5
+    real_prob = 0.5
+    for label, prob in label_probs.items():
+        if any(x in label for x in ["FAKE", "FALSE", "0"]):
+            fake_prob = prob
+        elif any(x in label for x in ["REAL", "TRUE", "1"]):
+            real_prob = prob
+
+    # Normalize
+    total = fake_prob + real_prob
+    if total > 0:
+        fake_prob /= total
+        real_prob /= total
+
+    # Determine verdict
+    if fake_prob > real_prob:
+        confidence = fake_prob
+        verdict = "FAKE" if confidence >= CONFIDENCE_THRESHOLD else "UNCERTAIN"
+    else:
+        confidence = real_prob
+        verdict = "REAL" if confidence >= CONFIDENCE_THRESHOLD else "UNCERTAIN"
+
+    return verdict, round(confidence, 4), round(fake_prob, 4), round(real_prob, 4)
+
+
+# ── Stage 2: GPT-4o Reasoning ────────────────────────────────────
+def run_llm(text: str, verdict: str, confidence: float):
+    """
+    Call GPT-4o to explain why the article is fake/real/uncertain.
+    Returns reasoning, red_flags, what_to_verify
+    """
+    try:
+        client = OpenAI(api_key=get_openai_key())
+        confidence_pct = round(confidence * 100, 1)
+
+        response = client.chat.completions.create(
+            model="gpt-4o",
+            temperature=0.2,
+            max_tokens=500,
+            response_format={"type": "json_object"},
+            messages=[
+                {
+                    "role": "system",
+                    "content": (
+                        "You are an expert fact-checker and media literacy educator. "
+                        "Analyze news articles for misinformation. "
+                        "Always respond with valid JSON only, no extra text."
+                    )
+                },
+                {
+                    "role": "user",
+                    "content": f"""An AI model classified this news as: {verdict}
+Confidence: {confidence_pct}%
+
+NEWS ARTICLE:
+\"\"\"{text[:3000]}\"\"\"
+
+Respond with this exact JSON:
+{{
+    "reasoning": "2-3 sentence explanation of why this is {verdict}",
+    "red_flags": [
+        "Red flag or manipulative technique #1",
+        "Red flag or manipulative technique #2",
+        "Red flag or manipulative technique #3"
+    ],
+    "what_to_verify": [
+        "Specific fact-check step #1",
+        "Specific fact-check step #2"
+    ]
+}}"""
+                }
+            ]
         )
 
-    st.markdown("<br>", unsafe_allow_html=True)
+        data = json.loads(response.choices[0].message.content)
+        return (
+            data.get("reasoning", "No reasoning provided."),
+            data.get("red_flags", []),
+            data.get("what_to_verify", [])
+        )
 
-    # Confidence progress bar
+    except Exception as e:
+        return (
+            f"AI reasoning unavailable: {str(e)}",
+            ["Could not generate red flags"],
+            ["Please verify manually on Reuters, AP News, or Snopes"]
+        )
+
+
+# ── UI Rendering Helpers ─────────────────────────────────────────
+def render_verdict(verdict, confidence):
+    confidence_pct = round(confidence * 100, 1)
+    if verdict == "FAKE":
+        st.markdown('<span class="verdict-fake">❌ FAKE NEWS</span>', unsafe_allow_html=True)
+    elif verdict == "REAL":
+        st.markdown('<span class="verdict-real">✅ LIKELY REAL</span>', unsafe_allow_html=True)
+    else:
+        st.markdown('<span class="verdict-uncertain">⚠️ UNCERTAIN</span>', unsafe_allow_html=True)
+    st.markdown("<br>", unsafe_allow_html=True)
     st.markdown(f"**Model Confidence: {confidence_pct}%**")
     st.progress(confidence)
 
 
-def render_llm_reasoning(llm_result: dict):
-    """Renders the LLM reasoning section."""
-
-    if not llm_result:
-        st.info("LLM reasoning unavailable for this result.")
-        return
-
-    # ── Reasoning paragraph ──────────────────────────────────
+def render_reasoning(reasoning, red_flags, what_to_verify):
     st.markdown("### 🧠 AI Reasoning")
-    st.write(llm_result.get("reasoning", "No reasoning provided."))
+    st.write(reasoning)
 
-    # ── Red Flags ────────────────────────────────────────────
-    red_flags = llm_result.get("red_flags", [])
     if red_flags:
         st.markdown("### 🚩 Red Flags Detected")
         for flag in red_flags:
-            st.markdown(
-                f'<div class="red-flag">🚩 {flag}</div>',
-                unsafe_allow_html=True
-            )
+            st.markdown(f'<div class="red-flag">🚩 {flag}</div>', unsafe_allow_html=True)
 
     st.markdown("<br>", unsafe_allow_html=True)
 
-    # ── What to Verify ───────────────────────────────────────
-    what_to_verify = llm_result.get("what_to_verify", [])
     if what_to_verify:
         st.markdown("### 🔎 What To Verify")
         for item in what_to_verify:
-            st.markdown(
-                f'<div class="verify-item">🔎 {item}</div>',
-                unsafe_allow_html=True
-            )
-
-
-def render_technical_details(result: dict):
-    """
-    Shows technical details in an expandable section.
-    Great for hackathon judges who want to see under the hood!
-    """
-    with st.expander("🔧 Technical Details", expanded=False):
-        col1, col2 = st.columns(2)
-
-        with col1:
-            st.metric(
-                "Fake Probability",
-                f"{round(result['bert_result']['fake_probability'] * 100, 1)}%"
-            )
-            st.metric(
-                "Real Probability",
-                f"{round(result['bert_result']['real_probability'] * 100, 1)}%"
-            )
-
-        with col2:
-            st.metric(
-                "Analysis Time",
-                f"{result['analysis_time_seconds']}s"
-            )
-            st.metric(
-                "LLM Provider",
-                result['llm_provider_used'].upper()
-            )
-
-        st.markdown("**BERT Model Used:**")
-        st.code(result['bert_model_used'])
+            st.markdown(f'<div class="verify-item">🔎 {item}</div>', unsafe_allow_html=True)
 
 
 # ── Main App ─────────────────────────────────────────────────────
-
 def main():
-    # ── Header ───────────────────────────────────────────────
+    # Header
     st.title("🔍 Fake News Detector")
     st.markdown(
-        "Paste any news article below. Our AI will analyze it using "
-        "a **BERT model** for detection and **GPT-4o** for reasoning."
+        "Paste any news article below. Our AI uses **RoBERTa** for detection "
+        "and **GPT-4o** to explain the reasoning."
     )
     st.divider()
 
-    # ── Backend Health Check ─────────────────────────────────
-    # Show a warning if backend isn't running
-    if not check_backend_health():
-        st.warning(
-            "⚠️ Backend server is not running. "
-            "Please start it with: `uvicorn backend.main:app --reload --port 8000`"
-        )
-        st.stop()   # Don't render rest of UI if backend is down
-
-    # ── Input Area ───────────────────────────────────────────
-    st.markdown("### 📰 Paste News Article")
-
-    # Example button — helps users quickly test the app
+    # Example button
     col1, col2 = st.columns([1, 4])
     with col1:
         if st.button("Load Example"):
@@ -279,13 +296,13 @@ def main():
                 "happening since 2019 when the rollout began."
             )
 
-    # Text input area
+    # Text input
     news_text = st.text_area(
         label="News article text",
         placeholder="Paste the news article text here (minimum 50 characters)...",
         height=200,
         key="input_text",
-        label_visibility="collapsed"   # hide label, placeholder is enough
+        label_visibility="collapsed"
     )
 
     # Character count
@@ -298,7 +315,7 @@ def main():
             unsafe_allow_html=True
         )
 
-    # ── Analyze Button ───────────────────────────────────────
+    # Analyze button
     analyze_clicked = st.button(
         "🔍 Analyze Article",
         type="primary",
@@ -306,38 +323,51 @@ def main():
         disabled=len(news_text.strip()) < 50 if news_text else True
     )
 
-    # ── Analysis & Results ───────────────────────────────────
+    # Run analysis
     if analyze_clicked and news_text:
+        start_time = time.time()
 
-        with st.spinner("🔄 Stage 1: BERT model analyzing..."):
-            result = analyze_text(news_text)
+        # Stage 1 - BERT
+        with st.spinner("🤖 Stage 1: RoBERTa model analyzing..."):
+            verdict, confidence, fake_prob, real_prob = run_bert(news_text)
 
-        if result:
-            st.divider()
-            st.markdown("## 📊 Analysis Results")
+        # Stage 2 - GPT-4o
+        with st.spinner("🧠 Stage 2: GPT-4o generating reasoning..."):
+            reasoning, red_flags, what_to_verify = run_llm(
+                news_text, verdict, confidence
+            )
 
-            # Verdict + confidence
-            render_verdict(result["verdict"], result["confidence"])
-            st.divider()
+        elapsed = round(time.time() - start_time, 2)
 
-            # LLM reasoning (shown for all verdicts)
-            if result.get("llm_result"):
-                render_llm_reasoning(result["llm_result"])
-                st.divider()
+        # Display results
+        st.divider()
+        st.markdown("## 📊 Analysis Results")
+        render_verdict(verdict, confidence)
+        st.divider()
+        render_reasoning(reasoning, red_flags, what_to_verify)
+        st.divider()
 
-            # Technical details for judges
-            render_technical_details(result)
+        # Technical details for judges
+        with st.expander("🔧 Technical Details", expanded=False):
+            col1, col2 = st.columns(2)
+            with col1:
+                st.metric("Fake Probability", f"{round(fake_prob * 100, 1)}%")
+                st.metric("Real Probability", f"{round(real_prob * 100, 1)}%")
+            with col2:
+                st.metric("Analysis Time", f"{elapsed}s")
+                st.metric("LLM", "GPT-4o")
+            st.code(BERT_MODEL_NAME, language=None)
 
-    # ── Footer ───────────────────────────────────────────────
+    # Footer
     st.markdown(
         '<div class="footer">'
-        'Built for hackathon | BERT + GPT-4o powered | '
-        'Always verify news from multiple credible sources'
+        'Built for hackathon by Team CodeSquad | '
+        'RoBERTa + GPT-4o powered | '
+        'Always verify from multiple credible sources'
         '</div>',
         unsafe_allow_html=True
     )
 
 
-# Entry point
 if __name__ == "__main__":
     main()
