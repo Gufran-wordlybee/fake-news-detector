@@ -256,7 +256,6 @@ def render_verdict(verdict, confidence):
     else:
         st.markdown('<span class="verdict-uncertain">⚠️ UNCERTAIN</span>', unsafe_allow_html=True)
     st.markdown("<br>", unsafe_allow_html=True)
-    st.markdown(f"**Model Confidence: {confidence_pct}%**")
     st.progress(confidence)
 
 
