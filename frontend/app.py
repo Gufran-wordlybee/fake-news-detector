@@ -349,15 +349,15 @@ def main():
         st.divider()
 
         # Technical details for judges
-        with st.expander("🔧 Technical Details", expanded=False):
-            col1, col2 = st.columns(2)
-            with col1:
-                st.metric("Fake Probability", f"{round(fake_prob * 100, 1)}%")
-                st.metric("Real Probability", f"{round(real_prob * 100, 1)}%")
-            with col2:
-                st.metric("Analysis Time", f"{elapsed}s")
-                st.metric("LLM", "GPT-4o")
-            st.code(BERT_MODEL_NAME, language=None)
+        # with st.expander("🔧 Technical Details", expanded=False):
+        #     col1, col2 = st.columns(2)
+        #     with col1:
+        #         st.metric("Fake Probability", f"{round(fake_prob * 100, 1)}%")
+        #         st.metric("Real Probability", f"{round(real_prob * 100, 1)}%")
+        #     with col2:
+        #         st.metric("Analysis Time", f"{elapsed}s")
+        #         st.metric("LLM", "GPT-4o")
+        #     st.code(BERT_MODEL_NAME, language=None)
 
     # Footer
     st.markdown(
