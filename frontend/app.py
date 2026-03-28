@@ -64,6 +64,7 @@ st.markdown("""
         padding: 0.5rem 1rem;
         margin: 0.3rem 0;
         border-radius: 0 8px 8px 0;
+        color: #7f0000;
     }
     .verify-item {
         background-color: #f0f7ff;
@@ -71,6 +72,7 @@ st.markdown("""
         padding: 0.5rem 1rem;
         margin: 0.3rem 0;
         border-radius: 0 8px 8px 0;
+        color: #0a3d6b;
     }
     .footer {
         text-align: center;
