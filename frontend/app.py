@@ -360,14 +360,14 @@ def main():
         #     st.code(BERT_MODEL_NAME, language=None)
 
     # Footer
-    st.markdown(
-        '<div class="footer">'
-        'Built for hackathon by Team CodeSquad | '
-        'RoBERTa + GPT-4o powered | '
-        'Always verify from multiple credible sources'
-        '</div>',
-        unsafe_allow_html=True
-    )
+    # st.markdown(
+    #     '<div class="footer">'
+    #     'Built for hackathon by Team CodeSquad | '
+    #     'RoBERTa + GPT-4o powered | '
+    #     'Always verify from multiple credible sources'
+    #     '</div>',
+    #     unsafe_allow_html=True
+    # )
 
 
 if __name__ == "__main__":
